@@ -25,45 +25,121 @@
 
 using namespace std::chrono_literals;
 
-class Talker : public rclcpp::Node
+class TalkerIn : public rclcpp::Node
 {
 public:
-  Talker()
-  : Node("talker_native")
+    TalkerIn()
+        : Node("TalkerIn_native", "", rclcpp::contexts::default_context::get_global_default_context(), { "__domain_id:=1" }, {}, true, false, true)
+    {
+        {
+            rcl_node_t * rcl_node = get_node_base_interface()->get_rcl_node_handle();
+            rmw_node_t * rmw_node = rcl_node_get_rmw_handle(rcl_node);
+            eprosima::fastrtps::Participant * p = rmw_fastrtps_cpp::get_participant(rmw_node);
+            RCLCPP_INFO(
+                this->get_logger(), "eprosima::fastrtps::Participant * %zu", reinterpret_cast<size_t>(p))
+        }
+
+        msg_ = std::make_shared<std_msgs::msg::String>();
+        auto publish =
+            [this]() -> void
+        {
+            msg_->data = "Hello World: " + std::to_string(count_++);
+            RCLCPP_INFO(this->get_logger(), "TalkerIn publishing To Domain 1: '%s'", msg_->data.c_str());
+            pub_->publish(msg_);
+        };
+        timer_ = create_wall_timer(500ms, publish);
+        pub_ = create_publisher<std_msgs::msg::String>("topic");
+
+        {
+            rcl_publisher_t * rcl_pub = pub_->get_publisher_handle();
+            rmw_publisher_t * rmw_pub = rcl_publisher_get_rmw_handle(rcl_pub);
+            eprosima::fastrtps::Publisher * p = rmw_fastrtps_cpp::get_publisher(rmw_pub);
+            RCLCPP_INFO(
+                this->get_logger(), "eprosima::fastrtps::Publisher * %zu", reinterpret_cast<size_t>(p))
+        }
+    }
+
+private:
+    size_t count_ = 1;
+    std::shared_ptr<std_msgs::msg::String> msg_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+    rclcpp::TimerBase::SharedPtr timer_;
+};
+
+class TalkerOut : public rclcpp::Node
+{
+public:
+    TalkerOut()
+  : Node("TalkerOut_native", "", rclcpp::contexts::default_context::get_global_default_context(), {"__domain_id:=2"}, {}, true, false, true)
   {
     {
       rcl_node_t * rcl_node = get_node_base_interface()->get_rcl_node_handle();
       rmw_node_t * rmw_node = rcl_node_get_rmw_handle(rcl_node);
       eprosima::fastrtps::Participant * p = rmw_fastrtps_cpp::get_participant(rmw_node);
-      RCLCPP_INFO(
-        this->get_logger(), "eprosima::fastrtps::Participant * %zu", reinterpret_cast<size_t>(p))
+      RCLCPP_INFO(this->get_logger(), "eprosima::fastrtps::Participant * %zu", reinterpret_cast<size_t>(p))
     }
 
     msg_ = std::make_shared<std_msgs::msg::String>();
-    auto publish =
-      [this]() -> void
-      {
-        msg_->data = "Hello World: " + std::to_string(count_++);
-        RCLCPP_INFO(this->get_logger(), "Publishing: '%s'", msg_->data.c_str());
-        pub_->publish(msg_);
-      };
-    timer_ = create_wall_timer(500ms, publish);
-    pub_ = create_publisher<std_msgs::msg::String>("chatter");
+    pub_ = create_publisher<std_msgs::msg::String>("topic");
 
     {
       rcl_publisher_t * rcl_pub = pub_->get_publisher_handle();
       rmw_publisher_t * rmw_pub = rcl_publisher_get_rmw_handle(rcl_pub);
       eprosima::fastrtps::Publisher * p = rmw_fastrtps_cpp::get_publisher(rmw_pub);
-      RCLCPP_INFO(
-        this->get_logger(), "eprosima::fastrtps::Publisher * %zu", reinterpret_cast<size_t>(p))
+      RCLCPP_INFO(this->get_logger(), "eprosima::fastrtps::Publisher * %zu", reinterpret_cast<size_t>(p))
     }
   }
 
+  void talk(const std::string& msg)
+  {
+      msg_->data = "Received From Subscriber: " + msg;
+      RCLCPP_INFO(this->get_logger(), "TalkerOut publishing To Domain 2: '%s'", msg_->data.c_str());
+  	pub_->publish(msg_);
+  }
+
 private:
-  size_t count_ = 1;
   std::shared_ptr<std_msgs::msg::String> msg_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-  rclcpp::TimerBase::SharedPtr timer_;
+};
+
+class TestSubscriberIn : public rclcpp::Node
+{
+public:
+    TestSubscriberIn(std::shared_ptr<TalkerOut> pTalker)
+        : Node("subscriber_native", "", rclcpp::contexts::default_context::get_global_default_context(), { "__domain_id:=1" }, {}, true, false, true)
+    {
+        talker_ = pTalker;
+        subscription_ = this->create_subscription<std_msgs::msg::String>("topic",
+            [this](std_msgs::msg::String::UniquePtr msg)
+        {
+            RCLCPP_INFO(this->get_logger(), "SubscriberIn Receiving from domain 1: '%s'", msg->data.c_str())
+            if (talker_ != nullptr)
+            {
+                talker_->talk(msg->data);
+            }
+        });
+    }
+
+private:
+    std::shared_ptr<TalkerOut> talker_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr subscription_;
+};
+
+class TestSubscriberOut : public rclcpp::Node
+{
+public:
+    TestSubscriberOut()
+        : Node("subscriber_native", "", rclcpp::contexts::default_context::get_global_default_context(), { "__domain_id:=2" }, {}, true, false, true)
+    {
+        subscription_ = this->create_subscription<std_msgs::msg::String>("topic",
+            [this](std_msgs::msg::String::UniquePtr msg)
+        {
+            RCLCPP_INFO(this->get_logger(), "SubscriberOut Receiving from domain 2: '%s'", msg->data.c_str())
+        });
+    }
+
+private:
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr subscription_;
 };
 
 int main(int argc, char * argv[])
@@ -74,8 +150,18 @@ int main(int argc, char * argv[])
   setvbuf(stdout, NULL, _IONBF, BUFSIZ);
 
   rclcpp::init(argc, argv);
-  auto node = std::make_shared<Talker>();
-  rclcpp::spin(node);
+  rclcpp::executors::SingleThreadedExecutor exec;
+
+  auto talkerIn = std::make_shared<TalkerIn>();
+  auto talkerOut = std::make_shared<TalkerOut>();
+  auto subscriberIn = std::make_shared<TestSubscriberIn>(talkerOut);
+  auto subscriberOut = std::make_shared<TestSubscriberOut>();
+  exec.add_node(talkerIn);
+  exec.add_node(talkerOut);
+  exec.add_node(subscriberIn);
+  exec.add_node(subscriberOut);
+  exec.spin();
+
   rclcpp::shutdown();
   return 0;
 }
