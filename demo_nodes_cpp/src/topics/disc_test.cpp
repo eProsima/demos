@@ -92,11 +92,16 @@ int main(int argc, char ** argv)
 
     rclcpp::shutdown();
 
+    int result = 0;
     for (int i = 0; i < n_subscribers; i++){
         std::shared_ptr<SimpleSubscriberNode> sub_node = subscriber_nodes[i];
         std::cout<<"Node: "<< i<< " received " << sub_node->get_count() << " messages!"<<std::endl;
+        if (sub_node->get_count() == 0)
+        {
+            result = -1;
+        }
     }
 
-    return 0;
+    return result;
 
 }
