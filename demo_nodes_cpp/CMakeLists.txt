@@ -30,6 +30,7 @@ function(custom_executable subfolder target)
 endfunction()
 
 # Tutorials of Publish/Subscribe with Topics
+custom_executable(topics disc_test)
 custom_executable(topics talker)
 custom_executable(topics listener)
 custom_executable(topics listener_best_effort)
